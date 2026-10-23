@@ -1,0 +1,55 @@
+name: Forecast on the FutureEval tournament and MiniBench
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"  # MiniBench questions stay open for about 3 hours
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "tournament, minibench or test_questions"
+        default: "tournament"
+
+concurrency:
+  group: forecast  # never two runs at once: each question gets one forecast per bot
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: ${{ vars.PRIMARY_VARIANT || 'angles' }}     # the primary, prize-eligible bot
+            role: primary
+            token: METACULUS_TOKEN
+          - variant: ${{ vars.CONTROL_VARIANT || 'template' }}   # the A/B control on a secondary bot account; skipped without its token
+            role: control
+            token: METACULUS_TOKEN_CONTROL
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Forecast
+        env:
+          METACULUS_TOKEN: ${{ secrets[matrix.token] }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BOT_RESEARCHER: ${{ matrix.role == 'primary' && vars.BOT_RESEARCHER || 'no_research' }}  # the control never uses our evidence
+          SP_SUPABASE_URL: ${{ vars.SP_SUPABASE_URL }}
+          SP_ANON_KEY: ${{ vars.SP_ANON_KEY }}
+          SP_EMAIL: ${{ secrets.SP_EMAIL }}
+          SP_PASSWORD: ${{ secrets.SP_PASSWORD }}
+          BOT_MODEL: ${{ vars.BOT_MODEL }}
+          BOT_MODELS: ${{ vars.BOT_MODELS }}
+          BOT_VARIANT: ${{ matrix.variant }}
+        run: |
+          if [ -z "$METACULUS_TOKEN" ]; then
+            if [ "${{ matrix.role }}" = "control" ]; then echo "no control bot token: control skipped"; exit 0; fi
+            echo "METACULUS_TOKEN is missing for the primary bot" >&2; exit 1
+          fi
+          # the control runs on MiniBench only: enough questions for the A/B comparison at a fraction of the cost
+          python bot.py --mode "${{ matrix.role == 'control' && 'minibench' || github.event.inputs.mode || 'tournament' }}"
