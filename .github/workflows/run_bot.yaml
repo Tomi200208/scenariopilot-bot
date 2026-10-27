@@ -15,6 +15,8 @@ concurrency:
 
 jobs:
   forecast:
+    # Scheduled runs only once the owner sets vars.BOT_LIVE=true; a manual test_questions run works before that.
+    if: github.event_name != 'schedule' || vars.BOT_LIVE == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -46,10 +48,15 @@ jobs:
           BOT_MODEL: ${{ vars.BOT_MODEL }}
           BOT_MODELS: ${{ vars.BOT_MODELS }}
           BOT_VARIANT: ${{ matrix.variant }}
+          ROLE: ${{ matrix.role }}
+          MODE_INPUT: ${{ github.event.inputs.mode }}  # read from the environment, never pasted into the script
         run: |
           if [ -z "$METACULUS_TOKEN" ]; then
-            if [ "${{ matrix.role }}" = "control" ]; then echo "no control bot token: control skipped"; exit 0; fi
+            if [ "$ROLE" = "control" ]; then echo "no control bot token: control skipped"; exit 0; fi
             echo "METACULUS_TOKEN is missing for the primary bot" >&2; exit 1
           fi
-          # the control runs on MiniBench only: enough questions for the A/B comparison at a fraction of the cost
-          python bot.py --mode "${{ matrix.role == 'control' && 'minibench' || github.event.inputs.mode || 'tournament' }}"
+          # the control runs on MiniBench only: enough questions for the A/B comparison at a fraction of the cost;
+          # a test_questions run stays a test for both bots (nothing is published)
+          mode="${MODE_INPUT:-tournament}"
+          if [ "$ROLE" = "control" ] && [ "$mode" != "test_questions" ]; then mode=minibench; fi
+          python bot.py --mode "$mode"

@@ -38,7 +38,9 @@ python bot.py --mode tournament                   # the tournament and MiniBench
 python -m pytest -q                               # offline tests, no keys needed
 ```
 
-In GitHub Actions, `.github/workflows/run_bot.yaml` runs the bot every 30 minutes. It needs the repository secrets
+In GitHub Actions, `.github/workflows/run_bot.yaml` runs the bot every 30 minutes once the repository variable
+`BOT_LIVE` is `true`; before that only manual runs start, and a manual `test_questions` run publishes nothing for
+either bot. It needs the repository secrets
 `METACULUS_TOKEN` and `OPENROUTER_API_KEY`, and the repository variable `BOT_MODEL` (an OpenRouter model id in
 litellm form, e.g. `openrouter/openai/<model>`). Research is off by default (`BOT_RESEARCHER=no_research`); with
 `BOT_RESEARCHER=scenariopilot` the bot also needs the variables `SP_SUPABASE_URL` and `SP_ANON_KEY` and the secrets
