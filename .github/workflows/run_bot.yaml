@@ -2,7 +2,9 @@ name: Forecast on the FutureEval tournament and MiniBench
 
 on:
   schedule:
-    - cron: "*/30 * * * *"  # MiniBench questions stay open for about 3 hours
+    # Every question is open for exactly 3 hours, and GitHub drops many runs at :00 and :30 (seen: 3-7 h gaps),
+    # so try every 15 minutes at off-peak minutes; a run with no new question costs no model calls.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       mode:
