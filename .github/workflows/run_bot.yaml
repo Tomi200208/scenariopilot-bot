@@ -20,7 +20,9 @@ jobs:
     # Scheduled runs only once the owner sets vars.BOT_LIVE=true; a manual test_questions run works before that.
     if: github.event_name != 'schedule' || vars.BOT_LIVE == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 355  # a live run loops for up to 340 minutes (below); hosted jobs may run 360
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +54,7 @@ jobs:
           BOT_VARIANT: ${{ matrix.variant }}
           ROLE: ${{ matrix.role }}
           MODE_INPUT: ${{ github.event.inputs.mode }}  # read from the environment, never pasted into the script
+          BOT_LIVE: ${{ vars.BOT_LIVE }}
         run: |
           if [ -z "$METACULUS_TOKEN" ]; then
             if [ "$ROLE" = "control" ]; then echo "no control bot token: control skipped"; exit 0; fi
@@ -60,5 +63,45 @@ jobs:
           # the control runs on MiniBench only: enough questions for the A/B comparison at a fraction of the cost;
           # a test_questions run stays a test for both bots (nothing is published)
           mode="${MODE_INPUT:-tournament}"
+          loop=no
+          if [ "$mode" = "tournament" ] && [ "$BOT_LIVE" = "true" ]; then loop=yes; fi
           if [ "$ROLE" = "control" ] && [ "$mode" != "test_questions" ]; then mode=minibench; fi
-          python bot.py --mode "$mode"
+          if [ "$loop" = "no" ]; then python bot.py --mode "$mode"; exit; fi
+          # Live: every question is open 3 hours and GitHub's scheduler skips runs for hours, so this run polls
+          # every 15 minutes for 340 minutes and the chain job then starts the next run.
+          start=$(date +%s); deadline=$((start + 340 * 60)); i=0; failed=0
+          while :; do
+            # a failed submission leaves the question open to the next poll, which pays for it again: stop after three
+            if timeout 20m python bot.py --mode "$mode"; then failed=0; else
+              failed=$((failed + 1)); echo "::warning::bot run $i failed or timed out ($failed in a row)"
+              [ "$failed" -ge 3 ] && { echo "::error::three failed polls in a row; stopping this run and the chain" >&2; exit 1; }
+            fi
+            i=$((i + 1)); next=$((start + i * 900))
+            now=$(date +%s); [ "$next" -gt "$now" ] && sleep $((next - now))
+            # judged on the clock, not the plan: a poll may take 20 minutes, so start one only with 15 left (ends by 345 < 355)
+            [ $(( $(date +%s) + 900 )) -gt "$deadline" ] && break
+          done
+
+  chain:
+    # Starts the next live run. A dispatch made with GITHUB_TOKEN does create a run (other events do not).
+    # The schedule above stays as the fallback that restarts a broken chain.
+    needs: forecast  # runs only when every forecast leg succeeded
+    if: vars.BOT_LIVE == 'true' && (github.event_name == 'schedule' || github.event.inputs.mode == 'tournament')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the next run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REF: ${{ github.ref_name }}
+        run: |
+          started=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq .run_started_at)
+          minutes=$(( ($(date +%s) - $(date -d "$started" +%s)) / 60 ))
+          # a run that ended early means the loop is broken: do not chain it into a storm of short runs
+          if [ "$minutes" -lt 60 ]; then echo "::warning::run lasted $minutes min; not chaining, the schedule restarts it"; exit 0; fi
+          gh workflow run run_bot.yaml --repo "$REPO" --ref "$REF" -f mode=tournament
+          echo "ran $minutes min; next run dispatched"

@@ -40,7 +40,9 @@ python -m pytest -q                               # offline tests, no keys neede
 
 In GitHub Actions, `.github/workflows/run_bot.yaml` runs the bot every 15 minutes once the repository variable
 `BOT_LIVE` is `true`; before that only manual runs start, and a manual `test_questions` run publishes nothing for
-either bot. It needs the repository secrets
+either bot. Because every question is open for 3 hours and GitHub's scheduler often skips runs for hours, a live run
+polls every 15 minutes for about 5 hours 40 minutes and then dispatches the next run itself (the schedule restarts the
+chain if it breaks; a run shorter than an hour does not chain). It needs the repository secrets
 `METACULUS_TOKEN` and `OPENROUTER_API_KEY`, and the repository variable `BOT_MODEL` (an OpenRouter model id in
 litellm form, e.g. `openrouter/openai/<model>`). Research is off by default (`BOT_RESEARCHER=no_research`); with
 `BOT_RESEARCHER=scenariopilot` the bot also needs the variables `SP_SUPABASE_URL` and `SP_ANON_KEY` and the secrets
